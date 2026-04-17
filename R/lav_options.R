@@ -984,6 +984,10 @@ lav_options_set <- function(opt = NULL) {
     "browne.residual.adf.model",
     "bollen.stine"
   ))
+  wrong.idx <- setdiff(
+    wrong.idx,
+    which(vapply(opt$test, lav_test_fmg_is_fmg, logical(1L)))
+  )
   if (length(wrong.idx) > 0L) {
     lav_msg_stop(gettextf(
       "invalid option(s) for test argument: %1$s. Possible options are: %2$s.",

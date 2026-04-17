@@ -60,7 +60,9 @@ Description: Fit a variety of latent variable models, including confirmatory
    factor analysis, structural equation modeling and latent growth curve models.
 Depends: R(>= 3.4)
 Imports: methods, stats4, stats, utils, graphics, MASS,
-         mnormt, pbivnorm, numDeriv, quadprog
+         mnormt, pbivnorm, numDeriv, quadprog, CompQuadForm
+Suggests: testthat (>= 3.0.0)
+Config/testthat/edition: 3
 BugReports: https://github.com/yrosseel/lavaan/issues
 License: GPL (>= 2)
 LazyData: yes

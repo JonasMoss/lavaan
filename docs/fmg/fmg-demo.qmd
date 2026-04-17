@@ -1,0 +1,321 @@
+---
+title: "FMG Goodness-of-Fit P-Values in lavaan"
+subtitle: "Local demonstration and implementation notes"
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    number-sections: true
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+
+## Purpose
+
+This note demonstrates the local lavaan integration of the FMG
+goodness-of-fit p-value methods from semTests. It is development
+documentation, not package-facing Rd documentation.
+
+The current implementation covers:
+
+- one-model p-values through `lavaan(..., test = ...)`
+- one-model p-values through `lavTest()`
+- one-model p-values through `fitMeasures(..., fm.args = ...)`
+- nested model comparisons through `lavTestLRT()`
+
+The currently supported nested surface is focused on FMG eigenvalue methods:
+`pall`, `all`, `peba`, and `eba`. Nested `pols` is intentionally not supported.
+
+```{r setup}
+find_repo_root <- function(path = getwd()) {
+  path <- normalizePath(path, mustWork = TRUE)
+  repeat {
+    desc <- file.path(path, "DESCRIPTION")
+    if (file.exists(desc)) {
+      dcf <- read.dcf(desc)
+      if (identical(unname(dcf[1, "Package"]), "lavaan")) {
+        return(path)
+      }
+    }
+    parent <- dirname(path)
+    if (identical(parent, path)) {
+      stop("Could not locate lavaan repository root.", call. = FALSE)
+    }
+    path <- parent
+  }
+}
+
+repo_root <- find_repo_root()
+
+invisible(capture.output(
+  pkgload::load_all(repo_root, export_all = FALSE, quiet = TRUE)
+))
+
+fmt_tests <- function(x) {
+  data.frame(
+    test = names(x),
+    chisq = vapply(x, `[[`, numeric(1), "stat"),
+    df = vapply(x, `[[`, numeric(1), "df"),
+    pvalue = vapply(x, `[[`, numeric(1), "pvalue"),
+    row.names = NULL
+  )
+}
+
+hs_model <- "
+  visual  =~ x1 + x2 + x3
+  textual =~ x4 + x5 + x6
+  speed   =~ x7 + x8 + x9
+"
+```
+
+## One-Model Tests
+
+Fit a standard Holzinger-Swineford CFA model with `estimator = "MLM"` so
+the robust Gamma-related ingredients are available.
+
+```{r one-model-fit}
+fit <- cfa(
+  hs_model,
+  data = HolzingerSwineford1939,
+  estimator = "MLM"
+)
+```
+
+### On demand with `lavTest()`
+
+FMG tests can be requested after fitting:
+
+```{r lavtest-on-demand}
+one_model_tests <- c(
+  "peba4_rls",
+  "peba4_ug_rls",
+  "eba2_rls",
+  "pols2_ml",
+  "pall_rls",
+  "all_rls"
+)
+
+test_out <- lavTest(
+  fit,
+  test = one_model_tests,
+  drop.list.single = FALSE
+)
+
+fmt_tests(test_out[one_model_tests])
+```
+
+### At fit time with `lavaan(..., test = ...)`
+
+The same tests can be computed while fitting. They are stored in the `@test`
+slot and are then available to summaries and downstream helpers.
+
+```{r fit-time-tests}
+fit_with_fmg <- cfa(
+  hs_model,
+  data = HolzingerSwineford1939,
+  estimator = "MLM",
+  test = c("peba4_rls", "peba4_ug_rls", "pols2_ml")
+)
+
+names(fit_with_fmg@test)
+
+fmt_tests(fit_with_fmg@test[c("peba4_rls", "peba4_ug_rls", "pols2_ml")])
+```
+
+### Through `fitMeasures()`
+
+`fitMeasures()` already has a selected-test mechanism. The FMG p-value is
+available by passing the desired FMG test as `fm.args$standard.test`.
+
+```{r fitmeasures}
+fitMeasures(
+  fit,
+  fit.measures = c("chisq", "df", "pvalue"),
+  fm.args = list(standard.test = "peba4_rls")
+)
+
+fitMeasures(
+  fit,
+  fit.measures = c("chisq", "df", "pvalue"),
+  fm.args = list(standard.test = "pols2_ml")
+)
+```
+
+## Nested Model Tests
+
+For nested comparisons, the currently supported FMG methods are `pall`, `all`,
+`peba`, and `eba`. `pall_ug_ml` is the main recommended nested comparison.
+
+```{r nested-models}
+hs_restricted <- "
+  visual  =~ x1 + a*x2 + x3
+  textual =~ x4 + a*x5 + a*x6
+  speed   =~ x7 + a*x8 + x9
+"
+
+fit_restricted <- cfa(
+  hs_restricted,
+  data = HolzingerSwineford1939,
+  estimator = "MLM"
+)
+
+fit_unrestricted <- cfa(
+  hs_model,
+  data = HolzingerSwineford1939,
+  estimator = "MLM"
+)
+```
+
+### Method 2000
+
+```{r nested-2000}
+lavTestLRT(
+  fit_restricted,
+  fit_unrestricted,
+  method = "satorra.2000",
+  test = "pall_ug_ml"
+)
+```
+
+### Method 2001
+
+```{r nested-2001}
+lavTestLRT(
+  fit_restricted,
+  fit_unrestricted,
+  method = "satorra.bentler.2001",
+  test = "peba4_ug_rls"
+)
+```
+
+### Grouped Nested Example
+
+Grouped nested comparisons are also covered for the FMG eigenvalue methods.
+
+```{r grouped-nested}
+fit_group_restricted <- cfa(
+  hs_model,
+  data = HolzingerSwineford1939,
+  group = "school",
+  group.equal = "loadings",
+  estimator = "MLM"
+)
+
+fit_group_unrestricted <- cfa(
+  hs_model,
+  data = HolzingerSwineford1939,
+  group = "school",
+  estimator = "MLM"
+)
+
+lavTestLRT(
+  fit_group_restricted,
+  fit_group_unrestricted,
+  method = "satorra.2000",
+  test = "pall_ug_ml"
+)
+```
+
+Nested `pols` is currently outside the supported surface:
+
+```{r nested-pols-error, error=TRUE}
+lavTestLRT(
+  fit_restricted,
+  fit_unrestricted,
+  method = "satorra.2000",
+  test = "pols2_ml"
+)
+```
+
+## Test String Grammar
+
+The test strings follow the semTests-style grammar:
+
+```text
+<method><parameter>_<ug?>_<chisq>
+```
+
+Examples:
+
+- `peba4_rls`: pEBA with 4 blocks, biased Gamma, RLS statistic.
+- `peba4_ug_rls`: pEBA with 4 blocks, unbiased Gamma, RLS statistic.
+- `eba2_ml`: EBA with 2 blocks, biased Gamma, ML statistic.
+- `pall_ug_ml`: penalized all-eigenvalue nested p-value, unbiased Gamma, ML statistic.
+
+The chi-square statistic suffix is:
+
+- `ml`: normal-theory ML chi-square.
+- `rls`: Browne residual normal-theory/model-based RLS statistic.
+
+The optional `ug` component requests the unbiased Gamma estimator.
+
+## Implementation Map
+
+The implementation is intentionally concentrated in a small number of files.
+
+| File | Role |
+|---|---|
+| `R/lav_test_fmg.R` | FMG parser, one-model p-values, UGamma helpers, nested p-values. |
+| `R/lav_test.R` | Allows FMG names in `lav_test_rename()` and dispatches from `lav_model_test()`. |
+| `R/lav_options.R` | Allows FMG names through final `test` option validation. |
+| `R/lav_test_LRT.R` | Adds a narrow FMG branch in `lavTestLRT()` for nested comparisons. |
+| `DESCRIPTION` | Adds `CompQuadForm` for Imhof p-values; `testthat` is temporary for local parity tests. |
+| `tests/testthat/` | Temporary parity tests against the local `semTests/` checkout. |
+
+### One-model path
+
+1. `lav_test_rename()` keeps FMG strings intact and validates them with
+   `lav_test_fmg_is_fmg()`.
+2. `lav_model_test()` detects FMG tests and calls `lav_test_fmg()`.
+3. `lav_test_fmg()` selects the requested ML or RLS statistic, constructs
+   UGamma, extracts eigenvalues, and computes the requested p-value.
+4. `fitMeasures()` uses its existing selected-test mechanism through
+   `fm.args$standard.test`; no separate named FMG fit measure is required.
+
+### Nested path
+
+1. `lavTestLRT()` detects FMG tests and dispatches to `lav_test_lrt_fmg()`.
+2. `lav_test_lrt_fmg()` builds the standard lavaan `anova` table shape and
+   fills the difference p-value from `lav_test_fmg_nested()`.
+3. `lav_test_fmg_nested()` computes the nested chi-square difference and the
+   eigenvalue reference distribution.
+4. Method `"2000"` uses the Satorra-2000 projection and semTests-compatible
+   group scaling for the full UGamma matrix.
+5. Method `"2001"` uses `(U0 - U1) %*% Gamma`.
+
+## Validation Status
+
+The temporary testthat suite compares the local implementation against the
+local semTests checkout.
+
+Covered one-model cases:
+
+- ungrouped Holzinger-Swineford CFA
+- grouped Holzinger-Swineford CFA
+- meanstructure Holzinger-Swineford CFA
+- `std`, `pall`, `all`, `peba`, `eba`, `pols`, `sb`, `ss`, and `sf` variants
+
+Covered nested cases:
+
+- ungrouped and grouped Holzinger-Swineford comparisons
+- methods `"2000"` and `"2001"`
+- `pall`, `all`, `peba`, and `eba` variants
+
+Package-level check status:
+
+```text
+R CMD build .
+R CMD check lavaan_0.6-22.2469.tar.gz
+Status: OK
+```
+
+## Open Decisions
+
+- Whether to keep temporary testthat tests or convert them before an upstream
+  pull request.
+- Whether to document `fitMeasures(..., fm.args = list(standard.test = ...))`
+  in Rd files or keep the first public documentation focused on `lavTest()`.
+- Whether nested `pols` should ever be added. It is currently excluded because
+  nested support is scoped to PALL, ALL, pEBA, and EBA.

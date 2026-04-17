@@ -177,10 +177,17 @@ lav_test_rename <- function(test, check = FALSE) {
     test[target.idx] <- "browne.residual.nt.model"
   }
 
+  # FMG tests - keep original names (they use flexible syntax with embedded
+  # parameters like peba4_ug_rls), just pass through for parsing by
+  # lav_test_fmg_parse()
+
 
   # check?
   if (check) {
-    # report unknown values
+    # identify FMG tests (they pass validation via lav_test_fmg_is_fmg)
+    fmg.idx <- which(vapply(test, lav_test_fmg_is_fmg, logical(1)))
+
+    # report unknown values (excluding FMG tests)
     bad.idx <- which(!test %in% c(
       "standard", "none", "default",
       "satorra.bentler",
@@ -195,6 +202,9 @@ lav_test_rename <- function(test, check = FALSE) {
       "browne.residual.adf",
       "browne.residual.adf.model"
     ))
+    # Remove FMG tests from bad.idx
+    bad.idx <- setdiff(bad.idx, fmg.idx)
+
     if (length(bad.idx) > 0L) {
       lav_msg_stop(sprintf(
         ngettext(
@@ -221,7 +231,7 @@ lav_test_rename <- function(test, check = FALSE) {
     }
   }
 
-  # reorder: first nonscaled, then scaled
+  # reorder: first nonscaled, then scaled, then FMG
   nonscaled.idx <- which(test %in% c(
     "standard", "none", "default",
     "bollen.stine",
@@ -238,7 +248,8 @@ lav_test_rename <- function(test, check = FALSE) {
     "mean.var.adjusted",
     "scaled.shifted"
   ))
-  test <- c(test[nonscaled.idx], test[scaled.idx])
+  fmg.idx <- which(vapply(test, lav_test_fmg_is_fmg, logical(1)))
+  test <- c(test[nonscaled.idx], test[scaled.idx], test[fmg.idx])
 
   test
 }
@@ -509,7 +520,41 @@ lav_model_test <- function(lavobject = NULL,
   ######################
 
   for (this.test in test) {
-    if (lavoptions$estimator == "PML") {
+    if (lav_test_fmg_is_fmg(this.test)) {
+      parsed <- lav_test_fmg_parse(this.test)
+      unscaled.TEST <- TEST[["standard"]]
+
+      if (parsed$chisq == "rls") {
+        unscaled.TEST <- lav_test_browne(
+          lavobject = NULL,
+          lavdata = lavdata,
+          lavsamplestats = lavsamplestats,
+          lavmodel = lavmodel,
+          lavpartable = lavpartable,
+          lavoptions = lavoptions,
+          lavh1 = lavh1,
+          lavimplied = lavimplied,
+          ADF = FALSE,
+          model.based = TRUE
+        )
+      }
+
+      TEST[[this.test]] <- lav_test_fmg(
+        lavobject = lavobject,
+        lavsamplestats = lavsamplestats,
+        lavmodel = lavmodel,
+        lavdata = lavdata,
+        lavoptions = lavoptions,
+        lavimplied = lavimplied,
+        TEST.unscaled = TEST[["standard"]],
+        TEST.chisq = unscaled.TEST,
+        E.inv = attr(VCOV, "E.inv"),
+        Delta = attr(VCOV, "Delta"),
+        WLS.V = attr(VCOV, "WLS.V"),
+        Gamma = attr(VCOV, "Gamma"),
+        test = this.test
+      )
+    } else if (lavoptions$estimator == "PML") {
       if (this.test == "mean.var.adjusted") {
         LABEL <- "mean+var adjusted correction (PML)"
         TEST[[this.test]] <-
@@ -797,5 +842,4 @@ lav_update_test_custom_h1 <- function(lav_obj_h0, lav_obj_h1) {
   lav_obj_h0@test <- newTEST
   lav_obj_h0
 }
-
 
