@@ -196,12 +196,12 @@ lav_test_fmg_browne_nt_model <- function(lavobject = NULL,
     for (g in seq_len(ngroups)) {
       RES <- WLS.obs[[g]] - WLS.est[[g]]
       Delta.c <- lav_matrix_orthogonal_complement(Delta[[g]])
-      tDGD <- crossprod(Delta.c, Gamma[[g]]) %*% Delta.c
-      tDGD.inv <- lav_matrix_symmetric_inverse(tDGD)
+      t_dgd <- crossprod(Delta.c, Gamma[[g]]) %*% Delta.c
+      t_dgd_inv <- lav_matrix_symmetric_inverse(t_dgd)
       Ng <- if (n.minus.one) nobs[[g]] - 1L else nobs[[g]]
-      tResDelta.c <- crossprod(RES, Delta.c)
+      t_res_delta_c <- crossprod(RES, Delta.c)
       stat.group[g] <-
-        Ng * drop(tResDelta.c %*% tDGD.inv %*% t(tResDelta.c))
+        Ng * drop(t_res_delta_c %*% t_dgd_inv %*% t(t_res_delta_c))
     }
     STAT <- sum(stat.group)
   } else {
@@ -222,11 +222,11 @@ lav_test_fmg_browne_nt_model <- function(lavobject = NULL,
       Gamma.inv.weighted[[g]] <- Gamma.inv.temp * Ng / ntotal
     }
     GI <- lav_matrix_bdiag(Gamma.inv.weighted)
-    tDGiD <- t(Delta.g) %*% GI %*% Delta.g
-    tDGiD.inv <- MASS::ginv(tDGiD)
+    t_dgid <- t(Delta.g) %*% GI %*% Delta.g
+    t_dgid_inv <- MASS::ginv(t_dgid)
     q1 <- drop(t(RES.all) %*% GI %*% RES.all)
     q2 <- drop(t(RES.all) %*%
-      GI %*% Delta.g %*% tDGiD.inv %*% t(Delta.g) %*% GI %*%
+      GI %*% Delta.g %*% t_dgid_inv %*% t(Delta.g) %*% GI %*%
       RES.all)
     STAT <- ntotal * (q1 - q2)
     stat.group <- STAT * unlist(nobs) / ntotal
@@ -910,10 +910,10 @@ lav_test_fmg_ugamma_nested <- function(m0, m1, unbiased = FALSE,
 
     # Safety check: remove zero rows/columns
     APA <- A %*% P.inv %*% t(A)
-    cSums <- colSums(APA)
-    rSums <- rowSums(APA)
-    empty.idx <- which(abs(cSums) < .Machine$double.eps^0.5 &
-                       abs(rSums) < .Machine$double.eps^0.5)
+    col_sums <- colSums(APA)
+    row_sums <- rowSums(APA)
+    empty.idx <- which(abs(col_sums) < .Machine$double.eps^0.5 &
+                       abs(row_sums) < .Machine$double.eps^0.5)
     if (length(empty.idx) > 0L) {
       A <- A[-empty.idx, , drop = FALSE]
     }

@@ -28,7 +28,53 @@ The current implementation covers:
 The currently supported nested surface is focused on FMG eigenvalue methods:
 `pall`, `all`, `peba`, and `eba`. Nested `pols` is intentionally not supported.
 
+## Changes vs. `origin/master`
+
+The integration is deliberately narrow: one new source file plus small,
+localized additions to existing files. No new runtime dependencies, no
+NAMESPACE changes, no changes to the optimizer or to the `@test` slot shape.
+
+| File | Change | Role |
+|---|---|---|
+| `R/lav_test_fmg.R` | **new**, ~950 lines | FMG parser, Imhof integrator, one-model + nested p-values, UGamma (biased/unbiased). |
+| `R/lav_test.R` | +54 / -3 | Let FMG names pass `lav_test_rename()`; one dispatch branch in `lav_model_test()`. |
+| `R/lav_test_LRT.R` | +123 | Early dispatch + `lav_test_lrt_fmg()` for nested comparisons. |
+| `R/lav_options.R` | +4 | Whitelist FMG names in final `test` validation. |
+| `R/lav_test_browne.R` | +6 / -2 | `chol()` → `MASS::ginv()` fallback when `A` is singular (grouped RLS). |
+| `DESCRIPTION` | +2 | `Suggests: testthat` *(local only; to be removed before upstream PR)*. |
+
+Total FMG-only footprint vs `origin/master`: 6 files, +1134 / -8 lines.
+
+### What FMG does *not* touch
+
+- No changes to NAMESPACE (all helpers are `@keywords internal`).
+- No new runtime imports. The quadratic-form p-value uses a pure-R Imhof
+  helper in `R/lav_test_fmg.R` rather than `CompQuadForm`.
+- No changes to the estimator, the optimizer, or the fit-time control flow;
+  FMG p-values are computed after `VCOV` is available, inside the existing
+  `lav_model_test()` loop.
+- No changes to the `lavobject@test` list shape. FMG entries use the standard
+  `test`, `stat`, `stat.group`, `df`, `refdistr`, `pvalue` keys.
+
+### Call-flow summary
+
+`cfa(..., test = "peba4_rls")` walks the same path as any other test name:
+
+1. `lav_options_set()` validates via `lav_test_rename()`; FMG names are
+   recognized by `lav_test_fmg_is_fmg()` and passed through unchanged.
+2. Estimation runs as usual. `VCOV` carries `E.inv`, `Delta`, `WLS.V`,
+   `Gamma` as attributes.
+3. `lav_lavaan_step14_test` calls `lav_model_test()`, which computes the
+   standard chi-square first, then dispatches FMG names to `lav_test_fmg()`.
+4. The result is stored in `@test` and is read by `summary()`,
+   `lavInspect(fit, "test")`, `lavTest()`, and `fitMeasures()`.
+
+`lavTestLRT(m0, m1, test = "pall_ml")` takes a parallel early-dispatch path
+into `lav_test_lrt_fmg()`, which builds the standard `anova`-shaped data
+frame and fills difference p-values from `lav_test_fmg_nested()`.
+
 ```{r setup}
+#| include: false
 find_repo_root <- function(path = getwd()) {
   path <- normalizePath(path, mustWork = TRUE)
   repeat {
