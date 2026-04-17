@@ -42,19 +42,25 @@ lav_test_fmg_parse <- function(string) {
   method <- NULL
   param <- 2L  # default for j (eba/peba) or gamma (pols)
   unbiased <- FALSE
-  chisq <- "rls"
+  unbiased.explicit <- FALSE
+  chisq <- "default"
+  chisq.explicit <- FALSE
 
   type <- splitted[1]
 
   # Parse unbiased and chisq from suffix parts
   if (length(splitted) == 3L) {
     unbiased <- (splitted[2] == "ug")
+    unbiased.explicit <- TRUE
     chisq <- splitted[3]
+    chisq.explicit <- TRUE
   } else if (length(splitted) == 2L) {
     if (splitted[2] %in% c("rls", "ml")) {
       chisq <- splitted[2]
+      chisq.explicit <- TRUE
     } else if (splitted[2] == "ug") {
       unbiased <- TRUE
+      unbiased.explicit <- TRUE
     }
   }
 
@@ -81,7 +87,45 @@ lav_test_fmg_parse <- function(string) {
     lav_msg_stop(gettextf("invalid FMG test type: %s", type))
   }
 
-  list(method = method, param = param, unbiased = unbiased, chisq = chisq)
+  list(
+    method = method,
+    param = param,
+    unbiased = unbiased,
+    chisq = chisq,
+    unbiased.explicit = unbiased.explicit,
+    chisq.explicit = chisq.explicit
+  )
+}
+
+lav_test_fmg_resolve_unbiased <- function(parsed, lavoptions = NULL) {
+  if (isTRUE(parsed$unbiased.explicit)) {
+    return(parsed$unbiased)
+  }
+  if (!is.null(lavoptions$gamma.unbiased)) {
+    return(isTRUE(lavoptions$gamma.unbiased))
+  }
+  FALSE
+}
+
+lav_test_fmg_resolve_chisq <- function(parsed, lavoptions = NULL) {
+  if (isTRUE(parsed$chisq.explicit)) {
+    return(parsed$chisq)
+  }
+
+  scaled.test <- "standard"
+  if (!is.null(lavoptions$scaled.test)) {
+    scaled.test <- lavoptions$scaled.test[1L]
+  }
+
+  if (scaled.test %in% c("default", "standard", "none")) {
+    return("ml")
+  } else if (scaled.test == "browne.residual.nt.model") {
+    return("rls")
+  }
+
+  lav_msg_stop(gettextf(
+    "FMG tests only support scaled.test = %1$s or %2$s",
+    dQuote("standard"), dQuote("browne.residual.nt.model")))
 }
 
 # =====================================================
@@ -126,10 +170,12 @@ lav_test_fmg <- function(lavobject = NULL,
 
   # Parse test string
   parsed <- lav_test_fmg_parse(test)
+  chisq <- lav_test_fmg_resolve_chisq(parsed, lavoptions = lavoptions)
+  unbiased <- lav_test_fmg_resolve_unbiased(parsed, lavoptions = lavoptions)
 
   if (is.null(TEST.chisq)) {
     TEST.chisq <- TEST.unscaled
-    if (parsed$chisq == "rls") {
+    if (chisq == "rls") {
       if (is.null(lavobject)) {
         return(NULL)
       }
@@ -153,8 +199,8 @@ lav_test_fmg <- function(lavobject = NULL,
       refdistr = "fmg",
       method = parsed$method,
       param = parsed$param,
-      unbiased = parsed$unbiased,
-      chisq.type = parsed$chisq
+      unbiased = unbiased,
+      chisq.type = chisq
     ))
   }
 
@@ -171,7 +217,7 @@ lav_test_fmg <- function(lavobject = NULL,
     Delta = Delta,
     WLS.V = WLS.V,
     Gamma = Gamma,
-    unbiased = parsed$unbiased
+    unbiased = unbiased
   )
 
   if (is.null(UGamma)) {
@@ -184,8 +230,8 @@ lav_test_fmg <- function(lavobject = NULL,
       refdistr = "fmg",
       method = parsed$method,
       param = parsed$param,
-      unbiased = parsed$unbiased,
-      chisq.type = parsed$chisq
+      unbiased = unbiased,
+      chisq.type = chisq
     ))
   }
 
@@ -219,8 +265,8 @@ lav_test_fmg <- function(lavobject = NULL,
     refdistr = "fmg",
     method = parsed$method,
     param = parsed$param,
-    unbiased = parsed$unbiased,
-    chisq.type = parsed$chisq,
+    unbiased = unbiased,
+    chisq.type = chisq,
     UGamma.eigenvalues = lambdas
   )
 }
@@ -332,6 +378,80 @@ lav_test_fmg_ugamma <- function(lavobject = NULL,
 # P-value methods
 # =====================================================
 
+#' Pure R Imhof p-value for quadratic forms
+#'
+#' Computes P[Q > q] where Q = sum(lambda_j * chi^2(h_j, delta_j)).
+#' This is a small R port of the Imhof integration used by CompQuadForm,
+#' using stats::integrate().
+#'
+#' @param q Observed quadratic-form value
+#' @param lambda Eigenvalues/weights
+#' @param h Degrees of freedom per component
+#' @param delta Noncentrality parameters per component
+#' @param epsabs Absolute integration tolerance
+#' @param epsrel Relative integration tolerance
+#' @param limit Maximum number of subdivisions
+#' @return List with Qq and abserr
+#' @keywords internal
+lav_test_fmg_imhof <- function(q, lambda, h = rep(1, length(lambda)),
+                               delta = rep(0, length(lambda)),
+                               epsabs = 1e-6, epsrel = 1e-6,
+                               limit = 10000L) {
+  lambda <- as.numeric(lambda)
+  h <- as.numeric(h)
+  delta <- as.numeric(delta)
+
+  keep <- abs(lambda) > .Machine$double.eps
+  lambda <- lambda[keep]
+  h <- h[keep]
+  delta <- delta[keep]
+
+  if (length(lambda) == 0L) {
+    return(list(Qq = ifelse(q < 0, 1, 0), abserr = 0))
+  }
+
+  if (length(lambda) == 1L) {
+    if (lambda > 0) {
+      Qq <- stats::pchisq(q / lambda, df = h, ncp = delta,
+                          lower.tail = FALSE)
+    } else if (q < 0) {
+      Qq <- stats::pchisq(q / lambda, df = h, ncp = delta)
+    } else {
+      Qq <- 0
+    }
+    return(list(Qq = Qq, abserr = 0))
+  }
+
+  integrand <- function(u) {
+    vapply(u, function(ui) {
+      if (ui == 0) {
+        return(0.5 * (sum((h + delta) * lambda) - q))
+      }
+
+      lu <- lambda * ui
+      lu2 <- lu * lu
+
+      theta <- 0.5 * sum(h * atan(lu) + delta * lu / (1 + lu2)) -
+        0.5 * q * ui
+      log.rho <- sum(0.25 * h * log1p(lu2) +
+        0.5 * delta * lu2 / (1 + lu2))
+
+      sin(theta) / (ui * exp(log.rho))
+    }, numeric(1L))
+  }
+
+  out <- stats::integrate(
+    integrand,
+    lower = 0,
+    upper = Inf,
+    rel.tol = epsrel,
+    abs.tol = epsabs,
+    subdivisions = limit
+  )
+
+  list(Qq = 0.5 + out$value / pi, abserr = out$abs.error)
+}
+
 #' Penalized EBA p-value (Foldnes et al. 2024)
 #'
 #' @param chisq Chi-square statistic
@@ -351,7 +471,7 @@ lav_test_fmg_peba <- function(chisq, lambdas, j = 4L) {
   repeated <- rep(eig_means, each = k)[seq_len(m)]
   penalized <- (repeated + eig_mean) / 2
 
-  CompQuadForm::imhof(chisq, penalized)$Qq
+  lav_test_fmg_imhof(chisq, penalized)$Qq
 }
 
 #' EBA p-value (Foldnes & Gronneberg 2018)
@@ -371,7 +491,7 @@ lav_test_fmg_eba <- function(chisq, lambdas, j = 4L) {
   eig_means <- colMeans(eig, na.rm = TRUE)
   repeated <- rep(eig_means, each = k)[seq_len(m)]
 
-  CompQuadForm::imhof(chisq, repeated)$Qq
+  lav_test_fmg_imhof(chisq, repeated)$Qq
 }
 
 #' Penalized OLS p-value (Foldnes et al. 2024)
@@ -394,7 +514,7 @@ lav_test_fmg_pols <- function(chisq, lambdas, gamma = 2) {
     lambda_hat <- pmax(beta0_hat + beta1_hat * x, 0)
   }
 
-  CompQuadForm::imhof(chisq, lambda_hat)$Qq
+  lav_test_fmg_imhof(chisq, lambda_hat)$Qq
 }
 
 #' Penalized all eigenvalues (for nested models)
@@ -407,7 +527,7 @@ lav_test_fmg_pall <- function(chisq, lambdas) {
   if (length(lambdas) == 0L) return(as.numeric(NA))
 
   penalized <- lambdas / 2 + mean(lambdas) / 2
-  CompQuadForm::imhof(chisq, penalized)$Qq
+  lav_test_fmg_imhof(chisq, penalized)$Qq
 }
 
 #' All eigenvalues exact p-value
@@ -419,7 +539,7 @@ lav_test_fmg_pall <- function(chisq, lambdas) {
 lav_test_fmg_all <- function(chisq, lambdas) {
   if (length(lambdas) == 0L) return(as.numeric(NA))
 
-  CompQuadForm::imhof(chisq, lambdas)$Qq
+  lav_test_fmg_imhof(chisq, lambdas)$Qq
 }
 
 #' Satorra-Bentler via eigenvalues
@@ -509,6 +629,8 @@ lav_test_fmg_nested <- function(m0, m1, test = "pall", method = "2000") {
 
   # Parse test string
   parsed <- lav_test_fmg_parse(test)
+  chisq <- lav_test_fmg_resolve_chisq(parsed, lavoptions = m1@Options)
+  unbiased <- lav_test_fmg_resolve_unbiased(parsed, lavoptions = m1@Options)
   if (!parsed$method %in% c("pall", "all", "peba", "eba")) {
     lav_msg_stop(gettextf(
       "FMG nested tests support %1$s only; got %2$s.",
@@ -528,7 +650,7 @@ lav_test_fmg_nested <- function(m0, m1, test = "pall", method = "2000") {
   }
 
   # Get chi-square difference
-  if (parsed$chisq == "rls") {
+  if (chisq == "rls") {
     chisq0 <- lavTest(m0, "browne.residual.nt.model")$stat
     chisq1 <- lavTest(m1, "browne.residual.nt.model")$stat
   } else {
@@ -539,7 +661,7 @@ lav_test_fmg_nested <- function(m0, m1, test = "pall", method = "2000") {
 
   # Get UGamma for nested comparison
   UGamma <- lav_test_fmg_ugamma_nested(m0, m1,
-                                        unbiased = parsed$unbiased,
+                                        unbiased = unbiased,
                                         method = method)
 
   if (is.null(UGamma)) {
@@ -561,7 +683,7 @@ lav_test_fmg_nested <- function(m0, m1, test = "pall", method = "2000") {
       "negative eigenvalues in first df eigenvalues of UGamma,
        falling back to method 2000"))
     UGamma <- lav_test_fmg_ugamma_nested(m0, m1,
-                                          unbiased = parsed$unbiased,
+                                          unbiased = unbiased,
                                           method = "2000")
     if (!is.null(UGamma)) {
       lambdas <- Re(eigen(UGamma, only.values = TRUE)$values)[seq_len(df)]
@@ -582,6 +704,8 @@ lav_test_fmg_nested <- function(m0, m1, test = "pall", method = "2000") {
     df = df,
     pvalue = pvalue,
     method = method,
+    chisq.type = chisq,
+    unbiased = unbiased,
     UGamma.eigenvalues = lambdas
   )
 }

@@ -614,8 +614,9 @@ lav_test_lrt_fmg <- function(mods, test = "pall_ug_ml", method = "default",
   )
 
   parsed <- lav_test_fmg_parse(test)
+  chisq <- lav_test_fmg_resolve_chisq(parsed, lavoptions = mods[[1]]@Options)
 
-  if (parsed$chisq == "rls") {
+  if (chisq == "rls") {
     TESTlist <- lapply(
       mods,
       function(x) lavTest(x, test = "browne.residual.nt.model")

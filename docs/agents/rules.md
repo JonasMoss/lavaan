@@ -12,8 +12,8 @@ These rules apply to coding agents working in this lavaan checkout.
 
 ## R Package Constraints
 
-- Keep new runtime dependencies minimal. `CompQuadForm` is currently added to
-  `DESCRIPTION` because FMG p-values call `CompQuadForm::imhof()`.
+- Keep new runtime dependencies minimal. FMG p-values now use the internal
+  pure R Imhof helper in `R/lav_test_fmg.R` instead of adding `CompQuadForm`.
 - Avoid adding dependency-heavy helpers from semTests such as `RSpectra` unless
   a clear performance need is demonstrated.
 - Preserve compatibility with lavaan's current R dependency unless the

@@ -1,31 +1,31 @@
 # Progress Report
 
-Last updated: 2026-04-16.
+Last updated: 2026-04-17.
 
 ## Repository State
 
 - Branch: `semTests`.
-- Modified tracked files:
-  - `.Rbuildignore`
-  - `DESCRIPTION`
-  - `R/lav_test_LRT.R`
-  - `R/lav_options.R`
+- Baseline checkpoint: `e6045ffe Add FMG p-value integration and parity tests`.
+- Current modified tracked files:
   - `R/lav_test.R`
-- Untracked local files/directories:
-  - `.codex`
-  - `Justfile`
-  - `CLAUDE.md`
+  - `R/lav_test_LRT.R`
   - `R/lav_test_fmg.R`
+  - `DESCRIPTION`
+  - `docs/agents/rules.md`
+  - `docs/fmg/fmg-demo.qmd`
+  - `tests/testthat/test-fmg-lrt.R`
+  - `tests/testthat/test-fmg-pvalues.R`
+- Current untracked local files/directories:
+  - `.codex`
+  - `docs/agents/recomputation.md`
+  - `docs/fmg/fmg-demo.html`
   - `semTests/`
-  - `AGENTS.md`
-  - `docs/agents/`
-  - `tests/`
 
 ## Completed Or Started
 
-- `DESCRIPTION` adds `CompQuadForm` to `Imports`.
 - `DESCRIPTION` temporarily adds `testthat` to `Suggests` for local parity
-  testing.
+  testing. The earlier `CompQuadForm` runtime import has been removed after
+  adding a pure R Imhof helper.
 - `R/lav_test.R` recognizes FMG-style test strings during validation and
   ordering.
 - `R/lav_options.R` allows FMG-style names through final `test` option
@@ -55,10 +55,19 @@ Last updated: 2026-04-16.
   records implementation notes, and renders to `docs/fmg/fmg-demo.html`.
 - `R/lav_test_fmg.R` contains a draft implementation for:
   - FMG test-name detection and parsing.
+  - A pure R Imhof integration helper for quadratic-form p-values.
   - Single-model FMG p-values: pEBA, EBA, pOLS, PALL, ALL, SB, scaled and
     shifted, scaled F, and standard chi-square.
   - UGamma construction with an optional unbiased Gamma path.
   - Nested-model FMG p-values and nested UGamma helpers.
+- The clean API now uses suffixless FMG names plus existing lavaan options:
+  `test = "peba4"` uses ML by default, `scaled.test =
+  "browne.residual.nt.model"` selects the RLS statistic, and
+  `gamma.unbiased = TRUE` selects the unbiased Gamma estimator. The old
+  semTests-style suffix strings remain accepted as a compatibility layer.
+- New regression tests compare `gamma.unbiased = TRUE` against semTests `_ug`
+  references for one-model and nested FMG p-values, and assert biased and
+  unbiased p-values are not silently identical.
 - The local `semTests/` checkout is available as reference source, including
   `R/pvalues.R`, `R/tests.R`, and `R/gamma.R`.
 
@@ -96,8 +105,8 @@ Result: passed.
 - `lavTestLRT(..., test = ...)` nested p-values match semTests for the scoped
   FMG eigenvalue methods: ungrouped and grouped Holzinger-Swineford comparisons
   under methods `"2000"` and `"2001"`.
-- The latest run emitted two `CompQuadForm::imhof()` numerical-integration
-  warnings during fitMeasures parity checks; p-values still matched semTests.
+- The pure R Imhof helper removed the previous `CompQuadForm::imhof()`
+  numerical-integration warnings in the local testthat suite.
 - `R CMD build .` completed and produced `lavaan_0.6-22.2469.tar.gz`.
 - `R CMD check lavaan_0.6-22.2469.tar.gz` completed with `Status: OK`.
 - `R CMD check .` is not the right local check command for this checkout

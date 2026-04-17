@@ -522,9 +522,10 @@ lav_model_test <- function(lavobject = NULL,
   for (this.test in test) {
     if (lav_test_fmg_is_fmg(this.test)) {
       parsed <- lav_test_fmg_parse(this.test)
+      chisq <- lav_test_fmg_resolve_chisq(parsed, lavoptions = lavoptions)
       unscaled.TEST <- TEST[["standard"]]
 
-      if (parsed$chisq == "rls") {
+      if (chisq == "rls") {
         unscaled.TEST <- lav_test_browne(
           lavobject = NULL,
           lavdata = lavdata,
@@ -842,4 +843,3 @@ lav_update_test_custom_h1 <- function(lav_obj_h0, lav_obj_h1) {
   lav_obj_h0@test <- newTEST
   lav_obj_h0
 }
-

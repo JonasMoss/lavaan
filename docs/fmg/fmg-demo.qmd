@@ -85,16 +85,16 @@ fit <- cfa(
 
 ### On demand with `lavTest()`
 
-FMG tests can be requested after fitting:
+FMG tests can be requested after fitting. Suffixless names use the standard ML
+chi-square statistic by default:
 
 ```{r lavtest-on-demand}
 one_model_tests <- c(
-  "peba4_rls",
-  "peba4_ug_rls",
-  "eba2_rls",
+  "peba4",
+  "eba2",
   "pols2_ml",
-  "pall_rls",
-  "all_rls"
+  "pall",
+  "all"
 )
 
 test_out <- lavTest(
@@ -106,9 +106,38 @@ test_out <- lavTest(
 fmt_tests(test_out[one_model_tests])
 ```
 
+Use lavaan's existing `scaled.test` option to switch the base chi-square
+statistic to Browne's residual NT model-based statistic:
+
+```{r lavtest-rls}
+lavTest(
+  fit,
+  test = "peba4",
+  scaled.test = "browne.residual.nt.model"
+)
+```
+
+Use the existing `gamma.unbiased` lavaan option to request the unbiased Gamma
+estimator:
+
+```{r lavtest-unbiased}
+fit_unbiased <- cfa(
+  hs_model,
+  data = HolzingerSwineford1939,
+  estimator = "MLM",
+  gamma.unbiased = TRUE
+)
+
+lavTest(
+  fit_unbiased,
+  test = "peba4",
+  scaled.test = "browne.residual.nt.model"
+)
+```
+
 ### At fit time with `lavaan(..., test = ...)`
 
-The same tests can be computed while fitting. They are stored in the `@test`
+The same option pattern works at fit time. FMG results are stored in the `@test`
 slot and are then available to summaries and downstream helpers.
 
 ```{r fit-time-tests}
@@ -116,12 +145,14 @@ fit_with_fmg <- cfa(
   hs_model,
   data = HolzingerSwineford1939,
   estimator = "MLM",
-  test = c("peba4_rls", "peba4_ug_rls", "pols2_ml")
+  test = "peba4",
+  scaled.test = "browne.residual.nt.model",
+  gamma.unbiased = TRUE
 )
 
 names(fit_with_fmg@test)
 
-fmt_tests(fit_with_fmg@test[c("peba4_rls", "peba4_ug_rls", "pols2_ml")])
+fmt_tests(fit_with_fmg@test["peba4"])
 ```
 
 ### Through `fitMeasures()`
@@ -131,9 +162,9 @@ available by passing the desired FMG test as `fm.args$standard.test`.
 
 ```{r fitmeasures}
 fitMeasures(
-  fit,
+  fit_with_fmg,
   fit.measures = c("chisq", "df", "pvalue"),
-  fm.args = list(standard.test = "peba4_rls")
+  fm.args = list(standard.test = "peba4")
 )
 
 fitMeasures(
@@ -146,7 +177,8 @@ fitMeasures(
 ## Nested Model Tests
 
 For nested comparisons, the currently supported FMG methods are `pall`, `all`,
-`peba`, and `eba`. `pall_ug_ml` is the main recommended nested comparison.
+`peba`, and `eba`. Suffixless names again inherit `scaled.test` and
+`gamma.unbiased` from the fitted models.
 
 ```{r nested-models}
 hs_restricted <- "
@@ -158,13 +190,15 @@ hs_restricted <- "
 fit_restricted <- cfa(
   hs_restricted,
   data = HolzingerSwineford1939,
-  estimator = "MLM"
+  estimator = "MLM",
+  gamma.unbiased = TRUE
 )
 
 fit_unrestricted <- cfa(
   hs_model,
   data = HolzingerSwineford1939,
-  estimator = "MLM"
+  estimator = "MLM",
+  gamma.unbiased = TRUE
 )
 ```
 
@@ -175,18 +209,34 @@ lavTestLRT(
   fit_restricted,
   fit_unrestricted,
   method = "satorra.2000",
-  test = "pall_ug_ml"
+  test = "pall"
 )
 ```
 
 ### Method 2001
 
 ```{r nested-2001}
+fit_restricted_rls <- cfa(
+  hs_restricted,
+  data = HolzingerSwineford1939,
+  estimator = "MLM",
+  scaled.test = "browne.residual.nt.model",
+  gamma.unbiased = TRUE
+)
+
+fit_unrestricted_rls <- cfa(
+  hs_model,
+  data = HolzingerSwineford1939,
+  estimator = "MLM",
+  scaled.test = "browne.residual.nt.model",
+  gamma.unbiased = TRUE
+)
+
 lavTestLRT(
-  fit_restricted,
-  fit_unrestricted,
+  fit_restricted_rls,
+  fit_unrestricted_rls,
   method = "satorra.bentler.2001",
-  test = "peba4_ug_rls"
+  test = "peba4"
 )
 ```
 
@@ -200,21 +250,23 @@ fit_group_restricted <- cfa(
   data = HolzingerSwineford1939,
   group = "school",
   group.equal = "loadings",
-  estimator = "MLM"
+  estimator = "MLM",
+  gamma.unbiased = TRUE
 )
 
 fit_group_unrestricted <- cfa(
   hs_model,
   data = HolzingerSwineford1939,
   group = "school",
-  estimator = "MLM"
+  estimator = "MLM",
+  gamma.unbiased = TRUE
 )
 
 lavTestLRT(
   fit_group_restricted,
   fit_group_unrestricted,
   method = "satorra.2000",
-  test = "pall_ug_ml"
+  test = "pall"
 )
 ```
 
@@ -231,7 +283,14 @@ lavTestLRT(
 
 ## Test String Grammar
 
-The test strings follow the semTests-style grammar:
+The user-facing API separates the three moving parts:
+
+- FMG method: `test = "peba4"`, `test = "eba2"`, `test = "pall"`, etc.
+- chi-square statistic: `scaled.test = "standard"` or
+  `scaled.test = "browne.residual.nt.model"`.
+- Gamma estimator: `gamma.unbiased = FALSE` or `TRUE`.
+
+The semTests-style suffix grammar is still accepted as a compatibility layer:
 
 ```text
 <method><parameter>_<ug?>_<chisq>
@@ -261,7 +320,7 @@ The implementation is intentionally concentrated in a small number of files.
 | `R/lav_test.R` | Allows FMG names in `lav_test_rename()` and dispatches from `lav_model_test()`. |
 | `R/lav_options.R` | Allows FMG names through final `test` option validation. |
 | `R/lav_test_LRT.R` | Adds a narrow FMG branch in `lavTestLRT()` for nested comparisons. |
-| `DESCRIPTION` | Adds `CompQuadForm` for Imhof p-values; `testthat` is temporary for local parity tests. |
+| `DESCRIPTION` | Temporarily adds `testthat` for local parity tests. |
 | `tests/testthat/` | Temporary parity tests against the local `semTests/` checkout. |
 
 ### One-model path
@@ -269,8 +328,9 @@ The implementation is intentionally concentrated in a small number of files.
 1. `lav_test_rename()` keeps FMG strings intact and validates them with
    `lav_test_fmg_is_fmg()`.
 2. `lav_model_test()` detects FMG tests and calls `lav_test_fmg()`.
-3. `lav_test_fmg()` selects the requested ML or RLS statistic, constructs
-   UGamma, extracts eigenvalues, and computes the requested p-value.
+3. `lav_test_fmg()` resolves the requested ML or RLS statistic from
+   `scaled.test`, resolves the Gamma estimator from `gamma.unbiased`,
+   constructs UGamma, extracts eigenvalues, and computes the requested p-value.
 4. `fitMeasures()` uses its existing selected-test mechanism through
    `fm.args$standard.test`; no separate named FMG fit measure is required.
 
