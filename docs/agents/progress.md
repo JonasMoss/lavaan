@@ -5,16 +5,16 @@ Last updated: 2026-04-17.
 ## Repository State
 
 - Branch: `semTests`.
-- Baseline checkpoint: `e6045ffe Add FMG p-value integration and parity tests`.
+- Rebases onto `origin/master` at `2881038c`.
+- Local commits after rebase:
+  - `155cd81c Add FMG p-value integration and parity tests`
+  - `5d51e04c Clean up FMG API and Imhof integration`
 - Current modified tracked files:
   - `R/lav_test.R`
   - `R/lav_test_LRT.R`
   - `R/lav_test_fmg.R`
-  - `DESCRIPTION`
-  - `docs/agents/rules.md`
-  - `docs/fmg/fmg-demo.qmd`
-  - `tests/testthat/test-fmg-lrt.R`
-  - `tests/testthat/test-fmg-pvalues.R`
+  - `R/lav_test_browne.R`
+  - `docs/agents/progress.md`
 - Current untracked local files/directories:
   - `.codex`
   - `docs/agents/recomputation.md`
@@ -68,6 +68,10 @@ Last updated: 2026-04-17.
 - New regression tests compare `gamma.unbiased = TRUE` against semTests `_ug`
   references for one-model and nested FMG p-values, and assert biased and
   unbiased p-values are not silently identical.
+- After rebasing onto current lavaan, FMG was adapted to upstream snake_case
+  internals (`lav_samplestats_gamma()`, `lav_test_diff_a()`). The new fast
+  Browne NT path now falls back to `MASS::ginv()` if the Cholesky inversion
+  fails, which preserves grouped RLS cases used by the semTests reference.
 - The local `semTests/` checkout is available as reference source, including
   `R/pvalues.R`, `R/tests.R`, and `R/gamma.R`.
 
@@ -107,8 +111,9 @@ Result: passed.
   under methods `"2000"` and `"2001"`.
 - The pure R Imhof helper removed the previous `CompQuadForm::imhof()`
   numerical-integration warnings in the local testthat suite.
-- `R CMD build .` completed and produced `lavaan_0.6-22.2469.tar.gz`.
-- `R CMD check lavaan_0.6-22.2469.tar.gz` completed with `Status: OK`.
+- `quarto render docs/fmg/fmg-demo.qmd` completed successfully.
+- `R CMD build .` completed and produced `lavaan_0.6-22.2560.tar.gz`.
+- `R CMD check lavaan_0.6-22.2560.tar.gz` completed with `Status: OK`.
 - `R CMD check .` is not the right local check command for this checkout
   because it fails before code checks with missing `Author`/`Maintainer`
   fields; checking the built tarball works because `R CMD build` materializes

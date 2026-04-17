@@ -344,8 +344,12 @@ lav_test_browne_nt_fast <- function(res = NULL, Delta = NULL,
   }
   A <- crossprod(Delta, gamma_inv_delta)
   b <- crossprod(Delta, u)
-  R_chol <- chol(A)
-  Ab_inv_b <- backsolve(R_chol, forwardsolve(t(R_chol), b))
+  R_chol <- try(chol(A), silent = TRUE)
+  if (inherits(R_chol, "try-error")) {
+    Ab_inv_b <- MASS::ginv(A) %*% b
+  } else {
+    Ab_inv_b <- backsolve(R_chol, forwardsolve(t(R_chol), b))
+  }
 
   term1 <- as.numeric(crossprod(res, u)) # t(res) Ginv res
   term2 <- as.numeric(crossprod(b, Ab_inv_b)) # t(b) A^{-1} b

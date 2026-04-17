@@ -526,7 +526,7 @@ lav_model_test <- function(lavobject = NULL,
       unscaled.TEST <- TEST[["standard"]]
 
       if (chisq == "rls") {
-        unscaled.TEST <- lav_test_browne(
+        unscaled.TEST <- lav_test_fmg_browne_nt_model(
           lavobject = NULL,
           lavdata = lavdata,
           lavsamplestats = lavsamplestats,
@@ -534,9 +534,7 @@ lav_model_test <- function(lavobject = NULL,
           lavpartable = lavpartable,
           lavoptions = lavoptions,
           lavh1 = lavh1,
-          lavimplied = lavimplied,
-          ADF = FALSE,
-          model.based = TRUE
+          lavimplied = lavimplied
         )
       }
 

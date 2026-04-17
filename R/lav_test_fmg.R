@@ -128,6 +128,135 @@ lav_test_fmg_resolve_chisq <- function(parsed, lavoptions = NULL) {
     dQuote("standard"), dQuote("browne.residual.nt.model")))
 }
 
+lav_test_fmg_browne_nt_model <- function(lavobject = NULL,
+                                          lavdata = NULL,
+                                          lavsamplestats = NULL,
+                                          lavmodel = NULL,
+                                          lavpartable = NULL,
+                                          lavoptions = NULL,
+                                          lavh1 = NULL,
+                                          lavimplied = NULL) {
+  out <- try(
+    lav_test_browne(
+      lavobject = lavobject,
+      lavdata = lavdata,
+      lavsamplestats = lavsamplestats,
+      lavmodel = lavmodel,
+      lavpartable = lavpartable,
+      lavoptions = lavoptions,
+      lavh1 = lavh1,
+      lavimplied = lavimplied,
+      ADF = FALSE,
+      model.based = TRUE
+    ),
+    silent = TRUE
+  )
+  if (!inherits(out, "try-error")) {
+    return(out)
+  }
+
+  if (!is.null(lavobject)) {
+    lavdata <- lavobject@Data
+    lavsamplestats <- lavobject@SampleStats
+    lavmodel <- lavobject@Model
+    lavpartable <- lavobject@ParTable
+    lavoptions <- lavobject@Options
+    lavh1 <- lavobject@h1
+    lavimplied <- lavobject@implied
+  }
+
+  if (!is.logical(lavoptions$gamma.n.minus.one)) {
+    n.minus.one <- !(lavoptions$estimator == "ML" &&
+      lavoptions$likelihood == "normal")
+  } else {
+    n.minus.one <- lavoptions$gamma.n.minus.one
+  }
+
+  Delta <- lav_model_delta(lavmodel)
+  Gamma <- lav_object_gamma(
+    lavobject = NULL,
+    lavdata = lavdata,
+    lavoptions = lavoptions,
+    lavsamplestats = lavsamplestats,
+    lavh1 = lavh1,
+    lavimplied = lavimplied,
+    ADF = FALSE,
+    model.based = TRUE
+  )
+  WLS.obs <- lavsamplestats@WLS.obs
+  WLS.est <- lav_model_wls_est(lavmodel)
+  nobs <- lavsamplestats@nobs
+  ntotal <- lavsamplestats@ntotal
+  ngroups <- length(WLS.obs)
+  stat.group <- numeric(ngroups)
+
+  lineq.flag <- lavmodel@eq.constraints || lavmodel@ceq.simple.only
+
+  if (!lineq.flag) {
+    for (g in seq_len(ngroups)) {
+      RES <- WLS.obs[[g]] - WLS.est[[g]]
+      Delta.c <- lav_matrix_orthogonal_complement(Delta[[g]])
+      tDGD <- crossprod(Delta.c, Gamma[[g]]) %*% Delta.c
+      tDGD.inv <- lav_matrix_symmetric_inverse(tDGD)
+      Ng <- if (n.minus.one) nobs[[g]] - 1L else nobs[[g]]
+      tResDelta.c <- crossprod(RES, Delta.c)
+      stat.group[g] <-
+        Ng * drop(tResDelta.c %*% tDGD.inv %*% t(tResDelta.c))
+    }
+    STAT <- sum(stat.group)
+  } else {
+    RES.all <- do.call("c", WLS.obs) - do.call("c", WLS.est)
+    Delta.all <- do.call("rbind", Delta)
+    if (lavmodel@eq.constraints) {
+      Delta.g <- Delta.all %*% lavmodel@eq.constraints.K
+    } else {
+      Delta.g <- Delta.all %*% lavmodel@ceq.simple.K
+    }
+    Gamma.inv.weighted <- vector("list", ngroups)
+    for (g in seq_len(ngroups)) {
+      Ng <- if (n.minus.one) nobs[[g]] - 1L else nobs[[g]]
+      Gamma.inv.temp <- try(solve(Gamma[[g]]), silent = TRUE)
+      if (inherits(Gamma.inv.temp, "try-error")) {
+        Gamma.inv.temp <- MASS::ginv(Gamma[[g]])
+      }
+      Gamma.inv.weighted[[g]] <- Gamma.inv.temp * Ng / ntotal
+    }
+    GI <- lav_matrix_bdiag(Gamma.inv.weighted)
+    tDGiD <- t(Delta.g) %*% GI %*% Delta.g
+    tDGiD.inv <- MASS::ginv(tDGiD)
+    q1 <- drop(t(RES.all) %*% GI %*% RES.all)
+    q2 <- drop(t(RES.all) %*%
+      GI %*% Delta.g %*% tDGiD.inv %*% t(Delta.g) %*% GI %*%
+      RES.all)
+    STAT <- ntotal * (q1 - q2)
+    stat.group <- STAT * unlist(nobs) / ntotal
+  }
+
+  if (!is.null(lavobject)) {
+    DF <- lavobject@test[[1]]$df
+  } else {
+    DF <- lav_partable_df(lavpartable)
+    if (!lavmodel@cin.simple.only && nrow(lavmodel@con.jac) > 0L) {
+      ceq.idx <- attr(lavmodel@con.jac, "ceq.idx")
+      if (length(ceq.idx) > 0L) {
+        DF <- DF + qr(lavmodel@con.jac[ceq.idx, , drop = FALSE])$rank
+      }
+    } else if (lavmodel@ceq.simple.only) {
+      DF <- lav_partable_ndat(lavpartable) - max(lavpartable$free)
+    }
+  }
+
+  list(
+    test = "browne.residual.nt.model",
+    stat = STAT,
+    stat.group = stat.group,
+    df = DF,
+    refdistr = "chisq",
+    pvalue = 1 - stats::pchisq(STAT, DF),
+    label = "Browne's residual (NT model-based) test"
+  )
+}
+
 # =====================================================
 # Main entry point
 # =====================================================
@@ -179,8 +308,7 @@ lav_test_fmg <- function(lavobject = NULL,
       if (is.null(lavobject)) {
         return(NULL)
       }
-      TEST.chisq <- lavTest(lavobject,
-                            test = "browne.residual.nt.model")
+      TEST.chisq <- lav_test_fmg_browne_nt_model(lavobject = lavobject)
     }
   }
   chisq_stat <- TEST.chisq$stat
@@ -311,8 +439,8 @@ lav_test_fmg_ugamma <- function(lavobject = NULL,
     # Recompute Gamma with unbiased = TRUE
     Gamma <- vector("list", ngroups)
     for (g in seq_len(ngroups)) {
-      Gamma[[g]] <- lav_samplestats_Gamma(
-        Y = lavdata@X[[g]],
+      Gamma[[g]] <- lav_samplestats_gamma(
+        m_y = lavdata@X[[g]],
         meanstructure = lavoptions$meanstructure,
         unbiased = TRUE
       )
@@ -651,8 +779,8 @@ lav_test_fmg_nested <- function(m0, m1, test = "pall", method = "2000") {
 
   # Get chi-square difference
   if (chisq == "rls") {
-    chisq0 <- lavTest(m0, "browne.residual.nt.model")$stat
-    chisq1 <- lavTest(m1, "browne.residual.nt.model")$stat
+    chisq0 <- lav_test_fmg_browne_nt_model(lavobject = m0)$stat
+    chisq1 <- lav_test_fmg_browne_nt_model(lavobject = m1)$stat
   } else {
     chisq0 <- m0@test[[1]]$stat
     chisq1 <- m1@test[[1]]$stat
@@ -728,8 +856,8 @@ lav_test_fmg_ugamma_nested <- function(m0, m1, unbiased = FALSE,
   if (unbiased) {
     Gamma <- vector("list", ngroups)
     for (g in seq_len(ngroups)) {
-      Gamma[[g]] <- lav_samplestats_Gamma(
-        Y = lavdata@X[[g]],
+      Gamma[[g]] <- lav_samplestats_gamma(
+        m_y = lavdata@X[[g]],
         meanstructure = m1@Options$meanstructure,
         unbiased = TRUE
       )
@@ -771,7 +899,7 @@ lav_test_fmg_ugamma_nested <- function(m0, m1, unbiased = FALSE,
       return(NULL)
     }
 
-    A <- lav_test_diff_A(m1, m0, method = "delta", reference = "H1")
+    A <- lav_test_diff_a(m1, m0, method = "delta", reference = "H1")
 
     # Handle equality constraints
     if (m1@Model@eq.constraints) {

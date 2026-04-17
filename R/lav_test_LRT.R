@@ -619,7 +619,7 @@ lav_test_lrt_fmg <- function(mods, test = "pall_ug_ml", method = "default",
   if (chisq == "rls") {
     TESTlist <- lapply(
       mods,
-      function(x) lavTest(x, test = "browne.residual.nt.model")
+      function(x) lav_test_fmg_browne_nt_model(lavobject = x)
     )
     Df <- sapply(TESTlist, function(x) x$df)
     STAT <- sapply(TESTlist, function(x) x$stat)
