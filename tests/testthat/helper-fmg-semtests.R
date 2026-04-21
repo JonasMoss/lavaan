@@ -92,6 +92,26 @@ fmg_hs_nested_fits <- function(...) {
   )
 }
 
+fmg_hs_grouped_nested_fits <- function(...) {
+  list(
+    restricted = lavaan::cfa(
+      fmg_hs_model(),
+      data = lavaan::HolzingerSwineford1939,
+      group = "school",
+      group.equal = "loadings",
+      estimator = "MLM",
+      ...
+    ),
+    unrestricted = lavaan::cfa(
+      fmg_hs_model(),
+      data = lavaan::HolzingerSwineford1939,
+      group = "school",
+      estimator = "MLM",
+      ...
+    )
+  )
+}
+
 fmg_reference_pvalues <- function(fit, tests) {
   ref <- fmg_semtests_reference()
   stats::setNames(
@@ -149,6 +169,15 @@ fmg_fit_slot_pvalues <- function(fit, tests) {
   )
 }
 
+fmg_lavtest_entries <- function(fit, tests, ...) {
+  out <- lavaan::lavTest(fit, test = tests, ...)
+  if (!is.null(out$pvalue)) {
+    stats::setNames(list(out), tests)
+  } else {
+    out[tests]
+  }
+}
+
 fmg_fitmeasures_pvalues <- function(fit, tests) {
   stats::setNames(
     vapply(tests, function(test) {
@@ -161,6 +190,48 @@ fmg_fitmeasures_pvalues <- function(fit, tests) {
     }, numeric(1L)),
     tests
   )
+}
+
+fmg_gamma_chisq_methods <- function() {
+  c("peba4", "eba2", "pols2", "sb", "ss", "sf", "all", "pall")
+}
+
+fmg_suffixless_option_methods <- function() {
+  c("peba4", "eba2", "pols2", "all", "pall")
+}
+
+fmg_gamma_chisq_suffixes <- function() {
+  c("_ml", "_rls", "_ug_ml", "_ug_rls")
+}
+
+fmg_gamma_chisq_tests <- function(methods = fmg_gamma_chisq_methods()) {
+  as.vector(outer(methods, fmg_gamma_chisq_suffixes(), paste0))
+}
+
+fmg_nested_gamma_chisq_methods <- function() {
+  c("pall", "all", "peba4", "eba2", "pols2")
+}
+
+fmg_nested_gamma_chisq_tests <- function(
+    methods = fmg_nested_gamma_chisq_methods()) {
+  fmg_gamma_chisq_tests(methods)
+}
+
+fmg_expect_gamma_chisq_combinations_differ <- function(
+    pvalues,
+    methods = fmg_gamma_chisq_methods(),
+    suffixes = fmg_gamma_chisq_suffixes()) {
+  pvalue_matrix <- matrix(
+    pvalues[paste0(rep(methods, times = length(suffixes)),
+                   rep(suffixes, each = length(methods)))],
+    nrow = length(methods),
+    dimnames = list(methods, suffixes)
+  )
+
+  apply(pvalue_matrix, 1L, function(x) {
+    testthat::expect_gt(min(abs(stats::dist(x))), 1e-10)
+  })
+  invisible(pvalue_matrix)
 }
 
 fmg_single_model_tests <- function() {
@@ -183,16 +254,7 @@ fmg_single_model_tests <- function() {
 }
 
 fmg_nested_model_tests <- function() {
-  c(
-    "pall_ug_ml",
-    "pall_ml",
-    "all_ml",
-    "peba4_ml",
-    "peba4_ug_ml",
-    "peba4_rls",
-    "peba4_ug_rls",
-    "eba2_ml"
-  )
+  fmg_nested_gamma_chisq_tests()
 }
 
 fmg_expect_semtests_parity <- function(fit, tests = fmg_single_model_tests()) {

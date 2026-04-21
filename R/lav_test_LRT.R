@@ -603,15 +603,11 @@ lav_test_lrt_single_model <- function(object, method = "default",
 lav_test_lrt_fmg <- function(mods, test = "pall_ug_ml", method = "default",
                              estimator = "ML", ntotal = NULL,
                              ngroups = NULL, missing = "listwise") {
-  fmg.method <- switch(method,
-    "default" = "2000",
-    "standard" = "2000",
-    "satorra2000" = "2000",
-    "satorrabentler2001" = "2001",
+  if (!method %in% c("default", "standard", "satorra2000")) {
     lav_msg_stop(gettextf(
       "method = %s is not available for FMG nested tests",
       dQuote(method)))
-  )
+  }
 
   parsed <- lav_test_fmg_parse(test)
   chisq <- lav_test_fmg_resolve_chisq(parsed, lavoptions = mods[[1]]@Options)
@@ -637,8 +633,7 @@ lav_test_lrt_fmg <- function(mods, test = "pall_ug_ml", method = "default",
       out <- lav_test_fmg_nested(
         m0 = mods[[m + 1L]],
         m1 = mods[[m]],
-        test = test,
-        method = fmg.method
+        test = test
       )
       STAT.delta[m + 1L] <- out$stat
       Df.delta[m + 1L] <- out$df
@@ -703,8 +698,7 @@ lav_test_lrt_fmg <- function(mods, test = "pall_ug_ml", method = "default",
   }
 
   attr(val, "heading") <- paste0(
-    "\nFMG Chi-Squared Difference Test (method = ",
-    dQuote(fmg.method), ", test = ", dQuote(test), ")\n"
+    "\nFMG Chi-Squared Difference Test (test = ", dQuote(test), ")\n"
   )
   class(val) <- c("anova", class(val))
 

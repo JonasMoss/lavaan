@@ -743,10 +743,9 @@ lav_test_fmg_scaled_f <- function(chisq, lambdas) {
 #' @param m0 Restricted (null) model
 #' @param m1 Unrestricted (alternative) model
 #' @param test Test specification string (e.g., "pall_ug_ml")
-#' @param method Either "2000" (Satorra) or "2001" (Satorra-Bentler)
 #' @return List with test results
 #' @keywords internal
-lav_test_fmg_nested <- function(m0, m1, test = "pall", method = "2000") {
+lav_test_fmg_nested <- function(m0, m1, test = "pall") {
 
   # Ensure m0 has more df than m1
   if (m0@test[[1]]$df < m1@test[[1]]$df) {
@@ -759,10 +758,10 @@ lav_test_fmg_nested <- function(m0, m1, test = "pall", method = "2000") {
   parsed <- lav_test_fmg_parse(test)
   chisq <- lav_test_fmg_resolve_chisq(parsed, lavoptions = m1@Options)
   unbiased <- lav_test_fmg_resolve_unbiased(parsed, lavoptions = m1@Options)
-  if (!parsed$method %in% c("pall", "all", "peba", "eba")) {
+  if (!parsed$method %in% c("pall", "all", "peba", "eba", "pols")) {
     lav_msg_stop(gettextf(
       "FMG nested tests support %1$s only; got %2$s.",
-      lav_msg_view(c("pall", "all", "peba", "eba"), "or"),
+      lav_msg_view(c("pall", "all", "peba", "eba", "pols"), "or"),
       dQuote(parsed$method)
     ))
   }
@@ -787,43 +786,28 @@ lav_test_fmg_nested <- function(m0, m1, test = "pall", method = "2000") {
   }
   chisq_diff <- chisq0 - chisq1
 
-  # Get UGamma for nested comparison
-  UGamma <- lav_test_fmg_ugamma_nested(m0, m1,
-                                        unbiased = unbiased,
-                                        method = method)
+  # Get UGamma for nested comparison (Satorra 2000 projection)
+  UGamma <- lav_test_fmg_ugamma_nested(m0, m1, unbiased = unbiased)
 
   if (is.null(UGamma)) {
     return(list(
       test = test,
       stat = chisq_diff,
       df = df,
-      pvalue = as.numeric(NA),
-      method = method
+      pvalue = as.numeric(NA)
     ))
   }
 
   # Compute first df eigenvalues
   lambdas <- Re(eigen(UGamma, only.values = TRUE)$values)[seq_len(df)]
 
-  # Check for negative eigenvalues (fallback to method 2000)
-  if (any(lambdas < 0) && method == "2001") {
-    lav_msg_warn(gettext(
-      "negative eigenvalues in first df eigenvalues of UGamma,
-       falling back to method 2000"))
-    UGamma <- lav_test_fmg_ugamma_nested(m0, m1,
-                                          unbiased = unbiased,
-                                          method = "2000")
-    if (!is.null(UGamma)) {
-      lambdas <- Re(eigen(UGamma, only.values = TRUE)$values)[seq_len(df)]
-    }
-  }
-
   # Compute p-value (pall is recommended for nested)
   pvalue <- switch(parsed$method,
     "pall" = lav_test_fmg_pall(chisq_diff, lambdas),
     "all"  = lav_test_fmg_all(chisq_diff, lambdas),
     "peba" = lav_test_fmg_peba(chisq_diff, lambdas, j = parsed$param),
-    "eba"  = lav_test_fmg_eba(chisq_diff, lambdas, j = parsed$param)
+    "eba"  = lav_test_fmg_eba(chisq_diff, lambdas, j = parsed$param),
+    "pols" = lav_test_fmg_pols(chisq_diff, lambdas, gamma = parsed$param)
   )
 
   list(
@@ -831,23 +815,20 @@ lav_test_fmg_nested <- function(m0, m1, test = "pall", method = "2000") {
     stat = chisq_diff,
     df = df,
     pvalue = pvalue,
-    method = method,
     chisq.type = chisq,
     unbiased = unbiased,
     UGamma.eigenvalues = lambdas
   )
 }
 
-#' Compute UGamma for nested models (Satorra 2000 method)
+#' Compute UGamma for nested models (Satorra 2000 projection)
 #'
 #' @param m0 Restricted model
 #' @param m1 Unrestricted model
 #' @param unbiased Use unbiased gamma?
-#' @param method "2000" or "2001"
 #' @return UGamma matrix
 #' @keywords internal
-lav_test_fmg_ugamma_nested <- function(m0, m1, unbiased = FALSE,
-                                        method = "2000") {
+lav_test_fmg_ugamma_nested <- function(m0, m1, unbiased = FALSE) {
 
   lavdata <- m1@Data
   ngroups <- lavdata@ngroups
@@ -875,77 +856,58 @@ lav_test_fmg_ugamma_nested <- function(m0, m1, unbiased = FALSE,
     if (!is.list(Gamma)) Gamma <- list(Gamma)
   }
 
-  if (method == "2001") {
-    # Simple: (U0 - U1) %*% Gamma
-    U0 <- lavInspect(m0, "U")
-    U1 <- lavInspect(m1, "U")
+  WLS.V <- lavTech(m1, "WLS.V")
+  PI <- lav_model_delta(m1@Model)
+  P.inv <- lavTech(m1, "inverted.information")
 
-    # Scale gamma by group weights
-    fg <- unlist(m1@SampleStats@nobs) / m1@SampleStats@ntotal
-    Gamma_scaled <- vector("list", length(Gamma))
-    for (g in seq_along(Gamma)) {
-      Gamma_scaled[[g]] <- Gamma[[g]] / fg[g]
-    }
-    Gamma_all <- lav_matrix_bdiag(Gamma_scaled)
-    UGamma <- (U0 - U1) %*% Gamma_all
-
-  } else {
-    # Satorra 2000 method (more robust)
-    WLS.V <- lavTech(m1, "WLS.V")
-    PI <- lav_model_delta(m1@Model)
-    P.inv <- lavTech(m1, "inverted.information")
-
-    if (is.null(P.inv)) {
-      return(NULL)
-    }
-
-    A <- lav_test_diff_a(m1, m0, method = "delta", reference = "H1")
-
-    # Handle equality constraints
-    if (m1@Model@eq.constraints) {
-      A <- A %*% t(m1@Model@eq.constraints.K)
-    } else if (m1@Model@ceq.simple.only) {
-      A <- A %*% t(m1@Model@ceq.simple.K)
-    }
-
-    # Safety check: remove zero rows/columns
-    APA <- A %*% P.inv %*% t(A)
-    col_sums <- colSums(APA)
-    row_sums <- rowSums(APA)
-    empty.idx <- which(abs(col_sums) < .Machine$double.eps^0.5 &
-                       abs(row_sums) < .Machine$double.eps^0.5)
-    if (length(empty.idx) > 0L) {
-      A <- A[-empty.idx, , drop = FALSE]
-    }
-
-    if (nrow(A) == 0L) {
-      return(NULL)
-    }
-
-    # PAAPAAP projection
-    PAAPAAP <- P.inv %*% t(A) %*% MASS::ginv(A %*% P.inv %*% t(A)) %*%
-               A %*% P.inv
-
-    # Build global matrices
-    fg <- unlist(m1@SampleStats@nobs) / m1@SampleStats@ntotal
-    Gamma_f <- vector("list", length(Gamma))
-    for (g in seq_along(Gamma)) {
-      Gamma_f[[g]] <- Gamma[[g]] / fg[g]
-    }
-    Gamma_all <- lav_matrix_bdiag(Gamma_f)
-
-    V_f <- WLS.V
-    for (g in seq_along(WLS.V)) {
-      V_f[[g]] <- fg[g] * WLS.V[[g]]
-    }
-    V_all <- lav_matrix_bdiag(V_f)
-
-    PI_all <- do.call(rbind, PI)
-
-    # U_global (eq. 22 in Satorra 2000)
-    U_all <- V_all %*% PI_all %*% PAAPAAP %*% t(PI_all) %*% V_all
-    UGamma <- U_all %*% Gamma_all
+  if (is.null(P.inv)) {
+    return(NULL)
   }
 
-  UGamma
+  A <- lav_test_diff_a(m1, m0, method = "delta", reference = "H1")
+
+  # Handle equality constraints
+  if (m1@Model@eq.constraints) {
+    A <- A %*% t(m1@Model@eq.constraints.K)
+  } else if (m1@Model@ceq.simple.only) {
+    A <- A %*% t(m1@Model@ceq.simple.K)
+  }
+
+  # Safety check: remove zero rows/columns
+  APA <- A %*% P.inv %*% t(A)
+  col_sums <- colSums(APA)
+  row_sums <- rowSums(APA)
+  empty.idx <- which(abs(col_sums) < .Machine$double.eps^0.5 &
+                     abs(row_sums) < .Machine$double.eps^0.5)
+  if (length(empty.idx) > 0L) {
+    A <- A[-empty.idx, , drop = FALSE]
+  }
+
+  if (nrow(A) == 0L) {
+    return(NULL)
+  }
+
+  # PAAPAAP projection
+  PAAPAAP <- P.inv %*% t(A) %*% MASS::ginv(A %*% P.inv %*% t(A)) %*%
+             A %*% P.inv
+
+  # Build global matrices
+  fg <- unlist(m1@SampleStats@nobs) / m1@SampleStats@ntotal
+  Gamma_f <- vector("list", length(Gamma))
+  for (g in seq_along(Gamma)) {
+    Gamma_f[[g]] <- Gamma[[g]] / fg[g]
+  }
+  Gamma_all <- lav_matrix_bdiag(Gamma_f)
+
+  V_f <- WLS.V
+  for (g in seq_along(WLS.V)) {
+    V_f[[g]] <- fg[g] * WLS.V[[g]]
+  }
+  V_all <- lav_matrix_bdiag(V_f)
+
+  PI_all <- do.call(rbind, PI)
+
+  # U_global (eq. 22 in Satorra 2000)
+  U_all <- V_all %*% PI_all %*% PAAPAAP %*% t(PI_all) %*% V_all
+  U_all %*% Gamma_all
 }

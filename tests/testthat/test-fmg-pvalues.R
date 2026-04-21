@@ -51,100 +51,148 @@ test_that("lavaan fit-time FMG tests populate the test slot", {
   )
 })
 
-test_that("gamma.unbiased option reaches FMG UGamma computation", {
+test_that("lavTest explicit FMG gamma and chisq combinations match semTests", {
   fmg_skip_if_no_semtests_reference()
 
-  fit_biased <- fmg_hs_fit()
-  fit_unbiased <- fmg_hs_fit(gamma.unbiased = TRUE)
-
-  option_tests <- c("peba4_rls", "peba4_ml")
-  suffix_tests <- c("peba4_ug_rls", "peba4_ug_ml")
+  fit <- fmg_hs_fit()
+  tests <- fmg_gamma_chisq_tests()
+  pvalues <- fmg_lavtest_pvalues(fit, tests)
 
   expect_equal(
-    fmg_lavtest_pvalues(fit_unbiased, option_tests),
-    stats::setNames(
-      fmg_reference_pvalues(fit_biased, suffix_tests),
-      option_tests
-    ),
+    pvalues,
+    fmg_reference_pvalues(fit, tests),
     tolerance = 1e-7,
     ignore_attr = TRUE
   )
-  expect_false(isTRUE(all.equal(
-    fmg_lavtest_pvalues(fit_biased, option_tests),
-    fmg_lavtest_pvalues(fit_unbiased, option_tests),
-    tolerance = 1e-12,
-    check.attributes = FALSE
-  )))
+  fmg_expect_gamma_chisq_combinations_differ(pvalues)
 })
 
-test_that("suffixless FMG tests use scaled.test and gamma.unbiased options", {
+test_that("lavaan fit-time explicit FMG gamma and chisq combinations match semTests", {
   fmg_skip_if_no_semtests_reference()
 
-  fit_biased <- fmg_hs_fit()
-  fit_unbiased <- fmg_hs_fit(gamma.unbiased = TRUE)
+  reference_fit <- fmg_hs_fit()
+  tests <- fmg_gamma_chisq_tests()
+  fit <- fmg_hs_fit(test = tests)
+  entries <- fit@test[tests]
+  pvalues <- fmg_fit_slot_pvalues(fit, tests)
 
-  get_pvalue <- function(x) {
-    if (!is.null(x$pvalue)) {
-      x$pvalue
-    } else {
-      x[["peba4"]]$pvalue
-    }
+  expect_true(all(tests %in% names(fit@test)))
+  expect_equal(
+    pvalues,
+    fmg_reference_pvalues(reference_fit, tests),
+    tolerance = 1e-7,
+    ignore_attr = TRUE
+  )
+  expect_equal(
+    unname(vapply(entries, `[[`, logical(1L), "unbiased")),
+    grepl("_ug_", tests)
+  )
+  expect_equal(
+    unname(vapply(entries, `[[`, character(1L), "chisq.type")),
+    ifelse(grepl("_rls$", tests), "rls", "ml")
+  )
+  fmg_expect_gamma_chisq_combinations_differ(pvalues)
+})
+
+test_that("suffixless lavTest FMG tests use gamma and chisq options", {
+  fmg_skip_if_no_semtests_reference()
+
+  reference_fit <- fmg_hs_fit()
+  fits <- list(
+    biased = reference_fit,
+    unbiased = fmg_hs_fit(gamma.unbiased = TRUE)
+  )
+  methods <- fmg_suffixless_option_methods()
+  cases <- list(
+    list(fit = "biased", suffix = "_ml", lavtest.args = list(),
+         unbiased = FALSE, chisq = "ml"),
+    list(fit = "biased", suffix = "_rls",
+         lavtest.args = list(scaled.test = "browne.residual.nt.model"),
+         unbiased = FALSE, chisq = "rls"),
+    list(fit = "unbiased", suffix = "_ug_ml", lavtest.args = list(),
+         unbiased = TRUE, chisq = "ml"),
+    list(fit = "unbiased", suffix = "_ug_rls",
+         lavtest.args = list(scaled.test = "browne.residual.nt.model"),
+         unbiased = TRUE, chisq = "rls")
+  )
+
+  for (case in cases) {
+    entries <- do.call(
+      fmg_lavtest_entries,
+      c(list(fit = fits[[case$fit]], tests = methods), case$lavtest.args)
+    )
+    pvalues <- stats::setNames(
+      vapply(entries, `[[`, numeric(1L), "pvalue"),
+      methods
+    )
+
+    expect_equal(
+      pvalues,
+      stats::setNames(
+        fmg_reference_pvalues(reference_fit, paste0(methods, case$suffix)),
+        methods
+      ),
+      tolerance = 1e-7,
+      ignore_attr = TRUE
+    )
+    expect_equal(
+      unname(vapply(entries, `[[`, logical(1L), "unbiased")),
+      rep(case$unbiased, length(methods))
+    )
+    expect_equal(
+      unname(vapply(entries, `[[`, character(1L), "chisq.type")),
+      rep(case$chisq, length(methods))
+    )
   }
+})
 
-  p_ml <- get_pvalue(lavaan::lavTest(fit_biased, test = "peba4"))
-  p_rls <- get_pvalue(lavaan::lavTest(
-    fit_biased,
-    test = "peba4",
-    scaled.test = "browne.residual.nt.model"
-  ))
-  p_ug_ml <- get_pvalue(lavaan::lavTest(fit_unbiased, test = "peba4"))
-  p_ug_rls <- get_pvalue(lavaan::lavTest(
-    fit_unbiased,
-    test = "peba4",
-    scaled.test = "browne.residual.nt.model"
-  ))
-  fit_time_ml <- suppressWarnings(fmg_hs_fit(test = "peba4"))
-  fit_time_rls <- fmg_hs_fit(
-    test = "peba4",
-    scaled.test = "browne.residual.nt.model"
+test_that("suffixless fit-time FMG tests use gamma and chisq options", {
+  fmg_skip_if_no_semtests_reference()
+
+  reference_fit <- fmg_hs_fit()
+  methods <- fmg_suffixless_option_methods()
+  cases <- list(
+    list(suffix = "_ml", fit.args = list(),
+         unbiased = FALSE, chisq = "ml"),
+    list(suffix = "_rls",
+         fit.args = list(scaled.test = "browne.residual.nt.model"),
+         unbiased = FALSE, chisq = "rls"),
+    list(suffix = "_ug_ml",
+         fit.args = list(gamma.unbiased = TRUE),
+         unbiased = TRUE, chisq = "ml"),
+    list(suffix = "_ug_rls",
+         fit.args = list(
+           scaled.test = "browne.residual.nt.model",
+           gamma.unbiased = TRUE
+         ),
+         unbiased = TRUE, chisq = "rls")
   )
 
-  expect_equal(
-    c(peba4 = p_ml),
-    stats::setNames(fmg_reference_pvalues(fit_biased, "peba4_ml"), "peba4"),
-    tolerance = 1e-7,
-    ignore_attr = TRUE
-  )
-  expect_equal(
-    c(peba4 = fit_time_ml@test[["peba4"]]$pvalue),
-    stats::setNames(fmg_reference_pvalues(fit_biased, "peba4_ml"), "peba4"),
-    tolerance = 1e-7,
-    ignore_attr = TRUE
-  )
-  expect_equal(
-    c(peba4 = p_rls),
-    stats::setNames(fmg_reference_pvalues(fit_biased, "peba4_rls"), "peba4"),
-    tolerance = 1e-7,
-    ignore_attr = TRUE
-  )
-  expect_equal(
-    c(peba4 = fit_time_rls@test[["peba4"]]$pvalue),
-    stats::setNames(fmg_reference_pvalues(fit_biased, "peba4_rls"), "peba4"),
-    tolerance = 1e-7,
-    ignore_attr = TRUE
-  )
-  expect_equal(
-    c(peba4 = p_ug_ml),
-    stats::setNames(fmg_reference_pvalues(fit_biased, "peba4_ug_ml"), "peba4"),
-    tolerance = 1e-7,
-    ignore_attr = TRUE
-  )
-  expect_equal(
-    c(peba4 = p_ug_rls),
-    stats::setNames(fmg_reference_pvalues(fit_biased, "peba4_ug_rls"), "peba4"),
-    tolerance = 1e-7,
-    ignore_attr = TRUE
-  )
+  for (case in cases) {
+    fit <- do.call(
+      fmg_hs_fit,
+      c(list(test = methods), case$fit.args)
+    )
+    entries <- fit@test[methods]
+
+    expect_equal(
+      fmg_fit_slot_pvalues(fit, methods),
+      stats::setNames(
+        fmg_reference_pvalues(reference_fit, paste0(methods, case$suffix)),
+        methods
+      ),
+      tolerance = 1e-7,
+      ignore_attr = TRUE
+    )
+    expect_equal(
+      unname(vapply(entries, `[[`, logical(1L), "unbiased")),
+      rep(case$unbiased, length(methods))
+    )
+    expect_equal(
+      unname(vapply(entries, `[[`, character(1L), "chisq.type")),
+      rep(case$chisq, length(methods))
+    )
+  }
 })
 
 test_that("fitMeasures one-model FMG p-values match semTests", {
