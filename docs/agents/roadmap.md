@@ -44,18 +44,21 @@ Reference methods:
   `lavTestLRT()` or the same path used by existing robust difference tests.
 - Validate model ordering, equal-df errors, Satorra 2000 fallback behavior, and
   negative-eigenvalue handling.
-- Keep the nested scope focused on FMG eigenvalue methods, not SB-style nested
-  tests: PALL, ALL, pEBA, and EBA under methods `"2000"` and `"2001"`.
-- Compare `pall_ug_ml`, `all_ml`, `peba4_*`, and `eba2_*` style results to
-  semTests reference outputs.
-- Keep pOLS outside the nested supported surface for now; `lavTestLRT()` should
-  fail explicitly for nested `pols*` tests instead of silently falling back to
-  another method.
+- Keep the nested scope focused on FMG eigenvalue-based methods, not SB-style
+  nested tests: PALL, ALL, pEBA, EBA, and pOLS under method `"2000"` only.
+  `method = "satorra.bentler.2001"` is not accepted for FMG nested tests
+  because the scaled-and-shifted style semTests-`"2001"` reference could not be
+  matched inside the SB-2001 mean-only lavaan branch.
+- Compare `pall_ug_ml`, `all_ml`, `peba4_*`, `eba2_*`, and `pols2_*` style
+  results to semTests reference outputs.
 - Match semTests group-weight scaling for the full nested method-2000 UGamma
   matrix. In the grouped path, Gamma blocks are rescaled by `1 / fg`, while
   WLS.V blocks are weighted by `fg`; this is needed for eigenvalue parity and
   differs from trace-only simplifications in lavaan's existing robust
   difference-test code.
+- Preserve the Browne NT fast-path `MASS::ginv()` fallback for singular
+  projection matrices. Grouped RLS tests hit this path when the unrestricted
+  model has rank-deficient `A`, so plain `chol(A)` is not sufficient.
 
 ## Phase 4: User-Facing Surfaces
 

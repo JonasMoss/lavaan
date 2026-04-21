@@ -25,8 +25,8 @@ The current implementation covers:
 - one-model p-values through `fitMeasures(..., fm.args = ...)`
 - nested model comparisons through `lavTestLRT()`
 
-The currently supported nested surface is focused on FMG eigenvalue methods:
-`pall`, `all`, `peba`, and `eba`. Nested `pols` is intentionally not supported.
+The currently supported nested surface is focused on FMG eigenvalue-based
+methods: `pall`, `all`, `peba`, `eba`, and `pols`.
 
 ## Changes vs. `origin/master`
 
@@ -40,7 +40,7 @@ NAMESPACE changes, no changes to the optimizer or to the `@test` slot shape.
 | `R/lav_test.R` | +54 / -3 | Let FMG names pass `lav_test_rename()`; one dispatch branch in `lav_model_test()`. |
 | `R/lav_test_LRT.R` | +123 | Early dispatch + `lav_test_lrt_fmg()` for nested comparisons. |
 | `R/lav_options.R` | +4 | Whitelist FMG names in final `test` validation. |
-| `R/lav_test_browne.R` | +6 / -2 | `chol()` → `MASS::ginv()` fallback when `A` is singular (grouped RLS). |
+| `R/lav_test_browne.R` | +6 / -2 | `chol()` -> `MASS::ginv()` fallback when the Browne NT fast-path projection matrix `A` is singular (grouped RLS). |
 | `DESCRIPTION` | +2 | `Suggests: testthat` *(local only; to be removed before upstream PR)*. |
 
 Total FMG-only footprint vs `origin/master`: 6 files, +1134 / -8 lines.
@@ -55,6 +55,12 @@ Total FMG-only footprint vs `origin/master`: 6 files, +1134 / -8 lines.
   `lav_model_test()` loop.
 - No changes to the `lavobject@test` list shape. FMG entries use the standard
   `test`, `stat`, `stat.group`, `df`, `refdistr`, `pvalue` keys.
+
+The Browne fast-path fallback is included because grouped RLS tests enter
+`lav_test_browne_nt_fast()` for unrestricted models where `A` can be
+rank-deficient. In the grouped Holzinger-Swineford RLS checks, `A` has rank 30
+in a 60 by 60 matrix for each group, so plain `chol(A)` fails and the
+Moore-Penrose solution `MASS::ginv(A) %*% b` is needed.
 
 ### Call-flow summary
 
@@ -223,7 +229,7 @@ fitMeasures(
 ## Nested Model Tests
 
 For nested comparisons, the currently supported FMG methods are `pall`, `all`,
-`peba`, and `eba`. Suffixless names again inherit `scaled.test` and
+`peba`, `eba`, and `pols`. Suffixless names again inherit `scaled.test` and
 `gamma.unbiased` from the fitted models.
 
 ```{r nested-models}
@@ -248,7 +254,11 @@ fit_unrestricted <- cfa(
 )
 ```
 
-### Method 2000
+### Nested comparison
+
+FMG nested tests use the Satorra (2000) UGamma projection. `method` must be
+`"satorra.2000"` (or left at the default); `"satorra.bentler.2001"` is not
+supported for FMG nested tests and errors.
 
 ```{r nested-2000}
 lavTestLRT(
@@ -259,9 +269,10 @@ lavTestLRT(
 )
 ```
 
-### Method 2001
+An RLS-based variant is selected through the fit-time options, not through
+`method`:
 
-```{r nested-2001}
+```{r nested-rls}
 fit_restricted_rls <- cfa(
   hs_restricted,
   data = HolzingerSwineford1939,
@@ -281,7 +292,7 @@ fit_unrestricted_rls <- cfa(
 lavTestLRT(
   fit_restricted_rls,
   fit_unrestricted_rls,
-  method = "satorra.bentler.2001",
+  method = "satorra.2000",
   test = "peba4"
 )
 ```
@@ -316,9 +327,10 @@ lavTestLRT(
 )
 ```
 
-Nested `pols` is currently outside the supported surface:
+Nested `pols` uses the same nested UGamma eigenvalues as the other FMG nested
+methods and matches the semTests reference:
 
-```{r nested-pols-error, error=TRUE}
+```{r nested-pols}
 lavTestLRT(
   fit_restricted,
   fit_unrestricted,
@@ -387,9 +399,12 @@ The implementation is intentionally concentrated in a small number of files.
    fills the difference p-value from `lav_test_fmg_nested()`.
 3. `lav_test_fmg_nested()` computes the nested chi-square difference and the
    eigenvalue reference distribution.
-4. Method `"2000"` uses the Satorra-2000 projection and semTests-compatible
-   group scaling for the full UGamma matrix.
-5. Method `"2001"` uses `(U0 - U1) %*% Gamma`.
+4. The Satorra-2000 projection with semTests-compatible group scaling is the
+   only supported UGamma construction for FMG nested tests;
+   `method = "satorra.bentler.2001"` is rejected because the scaled-and-shifted
+   style FMG p-values could not be made to match a sensible semTests
+   `method = "2001"` reference and the simpler `(U0 - U1) %*% Gamma`
+   construction is intentionally left out.
 
 ## Validation Status
 
@@ -406,8 +421,7 @@ Covered one-model cases:
 Covered nested cases:
 
 - ungrouped and grouped Holzinger-Swineford comparisons
-- methods `"2000"` and `"2001"`
-- `pall`, `all`, `peba`, and `eba` variants
+- `pall`, `all`, `peba`, `eba`, and `pols` variants (Satorra-2000 UGamma only)
 
 Package-level check status:
 
@@ -423,5 +437,3 @@ Status: OK
   pull request.
 - Whether to document `fitMeasures(..., fm.args = list(standard.test = ...))`
   in Rd files or keep the first public documentation focused on `lavTest()`.
-- Whether nested `pols` should ever be added. It is currently excluded because
-  nested support is scoped to PALL, ALL, pEBA, and EBA.
